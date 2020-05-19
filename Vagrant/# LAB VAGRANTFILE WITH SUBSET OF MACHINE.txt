@@ -1,0 +1,249 @@
+# LAB VAGRANTFILE WITH SUBSET OF MACHINES
+Vagrant.configure("2") do |config|
+  config.vm.define "lab-pfsense" do |cfg|
+    cfg.vm.box = "dlee35/pfsense"
+    cfg.vm.hostname = "pfsense"
+    cfg.vbguest.auto_update = false
+    cfg.vm.synced_folder ".", "/vagrant", disabled: true
+    cfg.vm.network "forwarded_port", guest: 80, host: 8080, auto_correct: true
+    cfg.vm.network "forwarded_port", guest: 443, host: 8443, auto_correct: true
+    #cfg.vm.network "forwarded_port", guest: 3000, host: 3000, auto_correct: true
+
+    cfg.vm.provider "vmware_desktop" do |v, override|
+      v.vmx["displayname"] = "LAB-PFSENSE"
+      v.vmx["ethernet0.virtualDev"] = "e1000"
+      v.vmx["ethernet0.pciSlotNumber"] = "32"
+      v.vmx["ethernet0.connectiontype"] = "nat"
+      v.vmx["ethernet1.present"] = "true"
+      v.vmx["ethernet1.virtualDev"] = "e1000"
+      v.vmx["ethernet1.pciSlotNumber"] = "33"
+      v.vmx["ethernet1.connectiontype"] = "custom"
+      v.vmx["ethernet1.vnet"] = "VMnet7"
+      v.memory = 512
+      v.cpus = 1
+      v.gui = true
+    end
+
+    cfg.vm.provider :virtualbox do |vb, override|
+      vb.name = "LAB-PFSENSE"
+      vb.gui = false
+      override.vm.network :private_network, virtualbox__intnet: "intnet", ip: "172.16.163.222", auto_config: false
+      vb.customize ["modifyvm", :id, "--memory", 512]
+      vb.customize ["modifyvm", :id, "--cpus", 1]
+      vb.customize ["modifyvm", :id, "--groups", "/LAB"]
+    end
+  end
+
+  config.vm.define "lab-rto" do |cfg|
+    cfg.vm.box = "bento/ubuntu-16.04"
+    cfg.vm.hostname = "rto"
+    cfg.vm.provision :shell, path: "bootstrap.sh"
+    cfg.vm.provision "reload"
+
+    cfg.vm.provider "vmware_desktop" do |v, override|
+      override.vm.synced_folder ".", "/vagrant", type: "rsync"
+      v.vmx["displayname"] = "LAB-RTO"
+      v.vmx["ethernet1.connectiontype"] = "custom"
+      v.vmx["ethernet1.present"] = "TRUE"
+      v.vmx["ethernet1.virtualdev"] = "e1000"
+      v.vmx["ethernet1.vnet"] = "VMnet7"
+      v.memory = 2048
+      v.cpus = 2
+      v.gui = true
+    end
+
+    cfg.vm.provider "virtualbox" do |vb, override|
+      vb.gui = false
+      vb.name = "LAB-RTO"
+      override.vm.network :private_network, virtualbox__intnet: "intnet", ip: "172.16.163.224", auto_config: false
+      vb.customize ["modifyvm", :id, "--memory", 2048]
+      vb.customize ["modifyvm", :id, "--cpus", 4]
+      vb.customize ["modifyvm", :id, "--vram", "32"]
+      vb.customize ["modifyvm", :id, "--clipboard", "bidirectional"]
+      vb.customize ["setextradata", "global", "GUI/SuppressMessages", "all" ]
+      vb.customize ["modifyvm", :id, "--groups", "/LAB"]
+    end
+  end
+  config.vm.define "lab-dc" do |cfg|
+    cfg.vm.box = "detectionlab/win2016"
+    cfg.vm.hostname = "dc"
+    cfg.vbguest.auto_update = false
+    cfg.vm.synced_folder ".", "/", type: "winrm"
+    cfg.vm.boot_timeout = 600
+    cfg.winrm.transport = :plaintext
+    cfg.vm.communicator = "winrm"
+    cfg.winrm.basic_auth_only = true
+    cfg.winrm.timeout = 300
+    cfg.winrm.retry_limit = 20
+
+    cfg.vm.provision "shell", path: "scripts/fix-second-network.ps1", run: "always", privileged: false, args: "-ip 172.16.163.211 -dns 172.16.163.211"
+    cfg.vm.provision "shell", path: "scripts/provision.ps1", privileged: false
+    cfg.vm.provision "reload"
+    cfg.vm.provision "shell", path: "scripts/provision.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/download_palantir_wef.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/download_palantir_osquery.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-splunkuf.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-inputsconf.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-utilities.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-redteam.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-choco-extras.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-osquery.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-sysinternals.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/configure-ou.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/configure-wef-gpo.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/configure-powershelllogging.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/configure-AuditingPolicyGPOs.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/configure-rdp-user-gpo.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/configure-disable-windows-defender-gpo.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-autorunstowineventlog.ps1", privileged: false
+    cfg.vm.provision "shell", inline: 'wevtutil el | Select-String -notmatch "Microsoft-Windows-LiveId" | Foreach-Object {wevtutil cl "$_"}', privileged: false
+    cfg.vm.provision "shell", inline: "Set-SmbServerConfiguration -AuditSmb1Access $true -Force", privileged: false
+
+    cfg.vm.provider "vmware_desktop" do |v, override|
+      v.vmx["displayname"] = "LAB-DC"
+      v.vmx["ethernet1.connectiontype"] = "custom"
+      v.vmx["ethernet1.present"] = "TRUE"
+      v.vmx["ethernet1.virtualdev"] = "e1000"
+      v.vmx["ethernet1.vnet"] = "VMnet7"
+      v.memory = 3072
+      v.cpus = 2
+      v.gui = true
+      v.enable_vmrun_ip_lookup = false
+    end
+
+    cfg.vm.provider "virtualbox" do |vb, override|
+      vb.gui = false
+      vb.name = "LAB-DC"
+      vb.default_nic_type = "82545EM"
+      override.vm.network :private_network, virtualbox__intnet: "intnet", ip: "172.16.163.211", gateway: "172.16.163.222"
+      vb.customize ["modifyvm", :id, "--memory", 3072]
+      vb.customize ["modifyvm", :id, "--cpus", 2]
+      vb.customize ["modifyvm", :id, "--vram", "32"]
+      vb.customize ["modifyvm", :id, "--clipboard", "bidirectional"]
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      vb.customize ["setextradata", "global", "GUI/SuppressMessages", "all" ]
+      vb.customize ["modifyvm", :id, "--groups", "/LAB"]
+    end
+  end
+
+  config.vm.define "lab-wef" do |cfg|
+    cfg.vm.box = "detectionlab/win2016"
+    cfg.vm.hostname = "wef"
+    cfg.vm.boot_timeout = 600
+    cfg.winrm.transport = :plaintext
+    cfg.vm.communicator = "winrm"
+    cfg.winrm.basic_auth_only = true
+    cfg.winrm.timeout = 300
+    cfg.winrm.retry_limit = 20
+    cfg.vm.synced_folder ".", "/", type: "winrm"
+
+
+    cfg.vm.provision "shell", path: "scripts/fix-second-network.ps1", run: "always", privileged: false, args: "-ip 172.16.163.212 -dns 172.16.163.211"
+    cfg.vm.provision "shell", path: "scripts/provision.ps1", privileged: false
+    cfg.vm.provision "shell", inline: "cscript c:\\windows\\system32\\slmgr.vbs -rearm", privileged: false
+    cfg.vm.provision "reload"
+    cfg.vm.provision "shell", path: "scripts/provision.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/download_palantir_wef.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/download_palantir_osquery.ps1", privileged: false
+    cfg.vm.provision "shell", inline: 'wevtutil el | Select-String -notmatch "Microsoft-Windows-LiveId" | Foreach-Object {wevtutil cl "$_"}', privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-wefsubscriptions.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-splunkuf.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-windows_ta.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-inputsconf.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-utilities.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-redteam.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-choco-extras.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-osquery.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-sysinternals.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-winlogbeat.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/configure-pslogstranscriptsshare.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-autorunstowineventlog.ps1", privileged: false
+    cfg.vm.provision "shell", inline: "Set-SmbServerConfiguration -AuditSmb1Access $true -Force", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-microsoft-ata.ps1", privileged: false
+
+    cfg.vm.provider "vmware_desktop" do |v, override|
+      v.vmx["displayname"] = "LAB-WEF"
+      v.vmx["ethernet1.connectiontype"] = "custom"
+      v.vmx["ethernet1.present"] = "TRUE"
+      v.vmx["ethernet1.virtualdev"] = "e1000"
+      v.vmx["ethernet1.vnet"] = "VMnet7"
+      v.memory = 2048
+      v.cpus = 2
+      v.gui = true
+      v.enable_vmrun_ip_lookup = false
+    end
+
+    cfg.vm.provider "virtualbox" do |vb, override|
+      vb.gui = false
+      vb.name = "LAB-WEF"
+      vb.default_nic_type = "82545EM"
+      override.vm.network :private_network, virtualbox__intnet: "intnet", ip: "172.16.163.212", gateway: "172.16.163.222"
+      vb.customize ["modifyvm", :id, "--memory", 2048]
+      vb.customize ["modifyvm", :id, "--cpus", 2]
+      vb.customize ["modifyvm", :id, "--vram", "32"]
+      vb.customize ["modifyvm", :id, "--clipboard", "bidirectional"]
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      vb.customize ["setextradata", "global", "GUI/SuppressMessages", "all" ]
+      vb.customize ["modifyvm", :id, "--groups", "/LAB"]
+    end
+  end
+
+  config.vm.define "lab-win10" do |cfg|
+    cfg.vm.box = "detectionlab/win10"
+    cfg.vm.hostname = "win10"
+    cfg.vm.boot_timeout = 1200
+    cfg.vm.communicator = "winrm"
+    cfg.winrm.basic_auth_only = true
+    cfg.winrm.timeout = 1200
+    cfg.winrm.retry_limit = 20
+    cfg.vm.synced_folder ".", "/", type: "winrm"
+
+
+    #cfg.vm.provision "shell", path: "scripts/fix-second-network.ps1", privileged: true, args: "-ip 172.16.163.100 -dns 172.16.163.211 -gateway 172.16.163.222"
+    cfg.vm.provision "shell", path: "scripts/MakeWindows10GreatAgain.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/provision.ps1", privileged: false
+    cfg.vm.provision "shell", inline: "cscript c:\\windows\\system32\\slmgr.vbs -rearm", privileged: false
+    cfg.vm.provision "reload"
+    cfg.vm.provision "shell", path: "scripts/provision.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/download_palantir_wef.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/download_palantir_osquery.ps1", privileged: false
+    cfg.vm.provision "shell", inline: 'wevtutil el | Select-String -notmatch "Microsoft-Windows-LiveId" | Foreach-Object {wevtutil cl "$_"}', privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-splunkuf.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-utilities.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-redteam.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-choco-extras.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-osquery.ps1", privileged: false
+    #cfg.vm.provision "shell", path: "scripts/install-inputsconf.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-sysinternals.ps1", privileged: false
+    cfg.vm.provision "shell", path: "scripts/install-autorunstowineventlog.ps1", privileged: false
+
+    cfg.vm.provider "vmware_desktop" do |v, override|
+      v.vmx["displayname"] = "LAB-WIN10"
+      v.vmx["ethernet1.connectiontype"] = "custom"
+      v.vmx["ethernet1.present"] = "TRUE"
+      v.vmx["ethernet1.virtualdev"] = "e1000"
+      v.vmx["ethernet1.vnet"] = "VMnet7"
+      v.vmx["gui.fullscreenatpoweron"] = "FALSE"
+      v.vmx["gui.viewModeAtPowerOn"] = "windowed"
+      v.memory = 2048
+      v.cpus = 1
+      v.gui = true
+      v.enable_vmrun_ip_lookup = false
+    end
+
+    cfg.vm.provider "virtualbox" do |vb, override|
+      vb.gui = false
+      vb.name = "LAB-WIN10"
+      vb.default_nic_type = "82545EM"
+      override.vm.network :private_network, virtualbox__intnet: "intnet", ip: "172.16.163.100", gateway: "172.16.163.222"
+      vb.customize ["modifyvm", :id, "--memory", 2048]
+      vb.customize ["modifyvm", :id, "--cpus", 1]
+      vb.customize ["modifyvm", :id, "--vram", "32"]
+      vb.customize ["modifyvm", :id, "--clipboard", "bidirectional"]
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      vb.customize ["setextradata", "global", "GUI/SuppressMessages", "all" ]
+      vb.customize ["modifyvm", :id, "--groups", "/LAB"]
+    end
+  end
+  
+end
